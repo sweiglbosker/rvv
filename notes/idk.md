@@ -1,3 +1,5 @@
+these are all bad just read the spec instead <https://docs.riscv.org/reference/isa/unpriv/v-st-ext.html>
+
 # RISC-V Vector Quick Intro
 
 <https://blog.timhutt.co.uk/riscv-vector/>
