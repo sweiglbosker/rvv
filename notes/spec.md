@@ -554,6 +554,9 @@ vsetivli rd, uimm, vtypei   # rd = new vl, uimm = AVL, vtypei = new vtype settin
 vsetvl   rd, rs1, rs2       # rd = new vl, rs1 = AVL, rs2 = new vtype value
 ```
 
+
+## Vtype encoding
+
 the vtype immediate has the following syntax:
 
 ```asm
@@ -576,3 +579,76 @@ vsetvli t0, a0, e8, m1, ta, ma      # SEW= 8, LMUL=1
 vsetvli t0, a0, e8, m2, ta, ma      # SEW= 8, LMUL=2
 vsetvli t0, a0, e32, mf2, ta, ma    # SEW=32, LMUL=1/2
 ```
+
+## AVL encoding
+
+The new vector length setting is based on AVL, which for `vsetvli` and `vsetvl` is encoded in the rs1 and rd field as follows:
+
+When rs1 is not x0, the AVL is an unsigned integer held in the x register specified by rs1, and the new vl value is also written to the x register specified by rd.
+
+When rs1=x0 but rd≠x0, the maximum unsigned integer value (~0) is used as the AVL, and the resulting VLMAX is written to vl and also to the x register specified by rd.
+
+When rs1=x0 and rd=x0, the instruction operates as if the current vector length in vl is used as the AVL, and the resulting value is written to vl, but not to a destination register. This form can only be used when VLMAX and hence vl is not actually changed by the new SEW/LMUL ratio. Use of the instruction with a new SEW/LMUL ratio that would result in a change of VLMAX is reserved. Use of the instruction is also reserved if vill was 1 beforehand. Implementations may set vill in either case.
+
+## Constraints on setting `vl`
+
+The vset{i}vl{i} instructions first set VLMAX according to their `vtype` argument, then set `vl` obeying the following contraints:
+
+1. vl = AVL if AVL ≤ VLMAX
+2. ceil(AVL / 2) ≤ vl ≤ VLMAX if AVL < (2 * VLMAX)
+3. vl = VLMAX if AVL ≥ (2 * VLMAX)
+4. Deterministic on any given implementation for same input AVL and VLMAX values
+5. These specific properties follow from the prior rules:
+    - vl = 0 if AVL = 0
+    - vl > 0 if AVL > 0
+    - ≤ VLMAX
+    - ≤ AVL
+    - a value read from vl when used as the AVL argument to vset{i}vl{i} results in the same value in vl, provided the resultant VLMAX equals the value of VLMAX at the time that vl was read
+
+
+# Vector loads and stores
+
+## Vector Load/Store encoding
+
+repurposes fp load/store major opcodes.
+
+Vector memory unit-stride and constant-stride operations directly encode EEW of the data to be transferred statically in the instruction to reduce the number of vtype changes when accessing memory in a mixed-width routine.
+Indexed operations use the explicit EEW encoding in the instruction to set the size of the indices used, and use SEW/LMUL to specify the data width.
+
+## Vector Load/Store addressing modes
+
+Supports unit-stride, strided, and indexed (scatter/gather) addressing modes.
+
+Vector load/store base registers and strides are taken from the GPR registers.
+
+The base effective address for all vector accesses is given by the register named in `rs1`
+
+Vector unit-stride operations access elements stored contiguously in memory starting from the base adderss (`base + i`)
+
+> note: im guessing unit-stride addressed ops are the best to codegen?
+
+Vector constant-strided operations access the first memory element at the base effective address, and then access subsequent elements at address incremements given by the *byte offset* contained in the gpr named in `rs2`.
+
+> note: e.g want to access the first column of each row of matrix
+
+Vector indexed operations add the contents of each element of the vector offset operand specified by `vs2` to the base effective address to give the effective address of each element.
+
+The data vector register group has EEW=SEW, EMUL=LMUL, while the offset vector register group2 has EEW encoded in the instruction EMUL=(EEW/SEW)*LMUL
+
+(these are also byte offsets)
+
+> note: if im understanding this correctly, this would also imply there are different instructions for different offset types.
+> also, the EMUL=(EEW/SEW)*LMUL part just means that that the number of elements is preserved (makes sense)
+
+> The indexed operations can also be used to access fields within a vector of objects, where the vs2 vector holds pointers to the base of the objects and the scalar x register holds the offset of the member field in each object. Supporting this case is why the indexed operations were not defined to scale the element indices by the data EEW.
+
+The `mop[1:0]` field encodes the addressing modes.
+
+| mop | Desc.            | Opcodes      | 
+|-----|------------------|--------------|
+| 00  | unit-stride      | `VLE<EEW>`   |
+| 01  | index-unordered  | `VLUXEI<EEW>`|
+| 10  | strided          | `VLSE<EEW>`  |
+| 11  | indexed-ordered  | `VLOXEI<EEW>`|
+
+same idea for stores
