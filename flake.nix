@@ -25,7 +25,7 @@
           riscv64-unknown-linux-gnu-gcc -march=rv64gcv $@
         '')
         (pkgs.writeShellScriptBin "r++" ''
-          riscv64-unknown-linux-gnu-g++ -march=rv64gcv $@
+          riscv64-unknown-linux-gnu-g++ -march=rv64gcv -std=c++23 $@
         '')
       ];
     };
