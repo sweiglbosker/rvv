@@ -880,3 +880,30 @@ vsetvli a1, t0, e32, m1, ta, ma
 vsuxseg2ei32.v v2, (x5), v5   # Store words from v2[i] to address x5+v5[i]
                                 #   and words from v3[i] to address x5+v5[i]+4
 ```
+
+# Vector Integer Arithmetic Instructions
+
+## Vector Single-Width Integer Add and Subtract
+
+Vector integer add and subtract are provided. Reverse-subtract (scalar - vec[i]) instructions are also provided for the vector-scalar forms.
+
+```
+# Integer adds.
+vadd.vv vd, vs2, vs1, vm   # Vector-vector
+vadd.vx vd, vs2, rs1, vm   # vector-scalar
+vadd.vi vd, vs2, imm, vm   # vector-immediate
+
+# Integer subtract
+vsub.vv vd, vs2, vs1, vm   # Vector-vector
+vsub.vx vd, vs2, rs1, vm   # vector-scalar
+
+# Integer reverse subtract
+vrsub.vx vd, vs2, rs1, vm   # vd[i] = x[rs1] - vs2[i]
+vrsub.vi vd, vs2, imm, vm   # vd[i] = imm - vs2[i]
+```
+
+> A vector of integer values can be negated using a reverse-subtract instruction with a scalar operand of x0. An assembly pseudoinstruction vneg.v vd,vs = vrsub.vx vd,vs,x0 is provided.
+
+## Vector Widening Integer Add/Subtract
+
+The widening add/subtract have both signed and unsigned variants.

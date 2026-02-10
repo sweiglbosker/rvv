@@ -1,0 +1,4 @@
+--target=riscv64-unknown-linux-gnu
+-mabi=lp64d
+-march=rv64gcv
+--sysroot=/nix/store/hrsnsmp9rj7hy0y4g7addhnnp1hwjkca-glibc-riscv64-unknown-linux-gnu-2.42-47

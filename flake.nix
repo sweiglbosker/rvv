@@ -16,9 +16,17 @@
   in {
     devShells.${system}.default = cross.mkShell {
       name = "rvv";
+      sysroot = sysroot;
       packages = [
         pkgs.qemu
         pkgs.gdb
+        pkgs.clang-tools
+        (pkgs.writeShellScriptBin "rcc" ''
+          riscv64-unknown-linux-gnu-gcc -march=rv64gcv $@
+        '')
+        (pkgs.writeShellScriptBin "r++" ''
+          riscv64-unknown-linux-gnu-g++ -march=rv64gcv $@
+        '')
       ];
     };
   };
