@@ -652,3 +652,231 @@ The `mop[1:0]` field encodes the addressing modes.
 | 11  | indexed-ordered  | `VLOXEI<EEW>`|
 
 same idea for stores
+
+Vector unit-stride and constant-stride memory accesses do not guarentee ordering between individual element accesses.
+The indexed load/store accesses have both unordered and ordered variants. The indexed-ordered variants preserve element ordering on memory accesses.
+
+> We care about ordering for the index variant because there may be overlapping indicies
+
+For unordered instructions (everything but index-ordered), there is no guarantee on element access order. 
+Therefore, if the accesses are to a strongly ordered IO region, the element accesses can be initiated in any order.
+
+> To provide ordered vector accesses to a strongly ordered IO region, the ordered indexed instructions should be used. 
+
+Also, for impls with precise vector traps, exceptions on indexed-unordered stores must also precise.
+
+Additional unit stride vector addressing modes are encoded using the 5-bit `lumop` and `sumop` fields in the unit-stride load and store instruction encodings.
+- unit-stride load (or store)
+- unit-stride, whole register load (or store)
+- unit-stride, mask load, EEW=8
+- unit-stride fault-only-first (load only)
+
+### aside, fault-only-first
+
+This may be discussed later (not sure yet).
+
+The unit stride FOF addressing mode is designed for safe vectorization of loops that may fault partway through a contiguous memory region.
+
+> Its used when the program does not know in advance how many elements can be safetly loaded.
+
+"fault-only-first" guarentees that **only** element 0 is allowed to generate a synchronous trap. (Later elements wont trap, even if they are invalid accesses)
+
+Instead the behavior is:
+1. load elements until a fault would occur
+2. stop loading further elements
+3. update `vl` to the number of elements succesfully loaded
+
+this enables safe vectorization of pointer-walking loops
+
+## Vector Load/Store width encoding
+
+Vector loads and stores have EEW encoded directly in the instruction.
+The corresponding EMUL is calculated as (EEW/SEW)*LMUL.
+
+Vector unit-stride and constant-stride use the EEW/EMUL encoded in the instruction for the data values.
+Vector indexed loads/stores use EEW/EMUL for the indexed values and the SEW/LMUL encoded in `vtype` for the data values.
+
+Implementations must provide vector loads and stores with EEWs corresponding to all supported SEW settings.
+
+## Vector Unit-Stride instructions
+
+```asm
+// loads
+vle32.v vd, (rs1)       // 32bit unit strided load
+vle32.v vd, (rs1), v0.t // w/ mask encoding
+
+// stores
+vse32.v vs3, (rs1)
+vse32.v vs3, (rs1), v0.t
+```
+
+
+there are also instructions for transferring mask values to/from memory. These operate similarly to unmasked byte loads or stores (EEW=8), except evl=ceil(vl/8), and always vta
+
+```asm
+vlm.v vd, (rs1)  // load byte of vector length ceil(vl/8)
+vsm.v vs3, (rs1) // store byte of vector length ceil(vl/8)
+```
+
+## Vector Strided instructions
+
+```asm
+# Vector strided loads and stores
+
+# vd destination, rs1 base address, rs2 byte stride
+vlse8.v    vd, (rs1), rs2, vm  #    8-bit strided load
+vlse16.v   vd, (rs1), rs2, vm  #   16-bit strided load
+vlse32.v   vd, (rs1), rs2, vm  #   32-bit strided load
+vlse64.v   vd, (rs1), rs2, vm  #   64-bit strided load
+
+
+# vs3 store data, rs1 base address, rs2 byte stride
+vsse8.v    vs3, (rs1), rs2, vm  #    8-bit strided store
+vsse16.v   vs3, (rs1), rs2, vm  #   16-bit strided store
+vsse32.v   vs3, (rs1), rs2, vm  #   32-bit strided store
+vsse64.v   vs3, (rs1), rs2, vm  #   64-bit strided store
+```
+
+Negative and zero strides are unsupported (hence the no ordered/unordered variants?)
+
+When rs2=x0, then an implementation is allowed, but not required, to perform fewer memory operations than the number of active elements, and may perform different numbers of memory operations across different dynamic executions of the same static instruction.
+
+> Compilers must be aware to not use the x0 form for rs2 when the immediate stride is 0 if the intent is to require all memory accesses are performed.
+
+When rs2!=x0 and the value of `x[rs2]=0`, the implementation must perform one memory access for each active element (but these accesses will not be ordered).
+
+> Note: they must *appear* to perform each memory access. Microarchitectures are free to optimize away accesses that would not be observed by another agent, for example, in idempotent memory regions obeying RVWMO. For non-idempotent memory regions, where by definition each access can be observed by a device, the optimization would not be possible. 
+
+> Note: skipping around here and adding to cheatsheet instead
+
+## Unit-Stride Fault-Only-First Loads
+
+The instructions execute as regular load except that they will only take a trap caused by a synchronous exception on element 0.
+If element 0 raises an exception, `vl` is not modified, and the trap is taken.
+
+If an element > 0 raises an exception, the corresponding trap is not taken, and the `vl` is reduced to the element that would have raised an exception.
+
+> Load instructions may overwrite active destination vector register group elements past the element index at which the trap is reported. Similarly, fault-only-first load instructions may update active destination elements past the element that causes trimming of the vector length.
+
+Non-idempotent memory locations can only be accessed when it is known the corresponding element load operation will not be restarted due to a trap or vector-length trimming.
+
+Here is an example strlen implementation:
+
+```asm
+strlen:
+    mv a3, a0             # Save start
+loop:
+    vsetvli a1, x0, e8, m8, ta, ma  # Vector of bytes of maximum length
+    vle8ff.v v8, (a3)      # Load bytes
+    csrr a1, vl           # Get bytes read
+    vmseq.vi v0, v8, 0    # Set v0[i] where v8[i] = 0
+    vfirst.m a2, v0       # Find first set bit
+    add a3, a3, a1        # Bump pointer
+    bltz a2, loop         # Not found?
+
+    add a0, a0, a1        # Sum start + bump
+    add a3, a3, a2        # Add index
+    sub a0, a3, a0        # Subtract start address+bump
+
+    ret
+```
+
+> There is a security concern with fault-on-first loads, as they can be used to probe for valid effective addresses. The unit-stride versions only allow probing a region immediately contiguous to a known region, and so reduce the security impact when used in unprivileged code. However, code running in S-mode can establish arbitrary page translations that allow probing of random guest physical addresses provided by a hypervisor. Strided and scatter/gather fault-only-first instructions are not provided due to lack of encoding space, but they can also represent a larger security hole, allowing even unprivileged software to easily check multiple random pages for accessibility without experiencing a trap. This standard does not address possible security mitigations for fault-only-first instructions. 
+
+## Load/Store Segment Instructions
+
+The vector load/store segment instructions move multiple contiguous fields to and from consecutively numbered vector registers
+
+> The name "segment" reflects that the items moved are subarrays with homogeneous elements. These operations can be used to transpose arrays between memory and registers, and can support operations on "array-of-structures" datatypes by unpacking each field in a structure into a separate vector register.
+
+> EMUL must be set st EMUL * NFIELDS ≤ 8.
+
+Each field will be held in successively numbered vector register groups.
+
+The `vl` register gives the number of segments to move, which is equal to the number of elements transferred to each vector register group.
+
+### Unit-Stride Segment Loads and Stores
+
+```asm
+# Format
+# In this syntax, <nf> equals NFIELDS and is an integer in the range [2, 8].
+vlseg<nf>e<eew>.v vd, (rs1), vm      # Unit-stride segment load template
+vsseg<nf>e<eew>.v vs3, (rs1), vm     # Unit-stride segment store template
+
+# Examples
+vlseg8e8.v vd, (rs1), vm   // Load eight vector registers with eight byte fields.
+
+vsseg3e32.v vs3, (rs1), vm  // Store packed vector of 3*4-byte segments from vs3,vs3+1,vs3+2 to memory
+```
+
+For loads, the vd register will hold the first field loaded from the segment.
+For stores, the vs3 register is read to provide the first field to be stored to each segment.
+
+```asm
+# Example 1
+# Memory structure holds packed RGB pixels (24-bit data structure, 8bpp)
+vsetvli a1, t0, e8, m1, ta, ma
+vlseg3e8.v v8, (a0), vm
+# v8 holds the red pixels
+# v9 holds the green pixels
+# v10 holds the blue pixels
+
+
+# Example 2
+# Memory structure holds complex values, 32b for real and 32b for imaginary
+vsetvli a1, t0, e32, m1, ta, ma
+vlseg2e32.v v8, (a0), vm
+# v8 holds real
+# v9 holds imaginary
+```
+
+there are also fault-only-first variants:
+
+```asm
+vlseg<nf>e<eew>ff.v vd, (rs1),  vm    # Unit-stride fault-only-first segment loads
+```
+
+### Strided Segment Loads and Stores
+
+Adds a byte-stride offset in `rs2`.
+
+Unlike the regular strided Loads/Stores, negative and zero strides are supported.
+
+```asm
+# Examples
+vsetvli a1, t0, e8, m1, ta, ma
+vlsseg3e8.v v4, (x5), x6   # Load bytes at addresses x5+i*x6   into v4[i],
+                            #  and bytes at addresses x5+i*x6+1 into v5[i],
+                            #  and bytes at addresses x5+i*x6+2 into v6[i].
+
+# Examples
+vsetvli a1, t0, e32, m1, ta, ma
+vssseg2e32.v v2, (x5), x6   # Store words from v2[i] to address x5+i*x6
+                            #   and words from v3[i] to address x5+i*x6+4
+```
+
+
+### Indexed Segment Loads and Stores
+
+Adds offsets in `vs2`. Addresses are computed by adding the cooresponding byte offset in `vs2` to the base address in `rs1`.
+
+Like the standard variants, both unordered and ordered forms are provided
+
+```asm
+# Format
+vluxseg<nf>ei<eew>.v vd, (rs1), vs2, vm   # Indexed-unordered segment loads
+vloxseg<nf>ei<eew>.v vd, (rs1), vs2, vm   # Indexed-ordered segment loads
+vsuxseg<nf>ei<eew>.v vs3, (rs1), vs2, vm  # Indexed-unordered segment stores
+vsoxseg<nf>ei<eew>.v vs3, (rs1), vs2, vm  # Indexed-ordered segment stores
+
+# Examples
+vsetvli a1, t0, e8, m1, ta, ma
+vluxseg3ei8.v v4, (x5), v3   # Load bytes at addresses x5+v3[i]   into v4[i],
+                                #  and bytes at addresses x5+v3[i]+1 into v5[i],
+                                #  and bytes at addresses x5+v3[i]+2 into v6[i].
+
+# Examples
+vsetvli a1, t0, e32, m1, ta, ma
+vsuxseg2ei32.v v2, (x5), v5   # Store words from v2[i] to address x5+v5[i]
+                                #   and words from v3[i] to address x5+v5[i]+4
+```

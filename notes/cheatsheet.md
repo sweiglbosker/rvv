@@ -1,32 +1,32 @@
-Vector Memory Instructions
-==========================
+Glossary
+========
 
-- vector load:vlb, vlbu, vlh, vlhu, vlw, vlwu, vld, vflh, vflw, vfld
-- vector load, strided: vlsb, vlsbu, vlsh, vlshu, vlsw, vlswu, vlsd, vflsh, vflsw, vflsd
-- vector load, indexed (gather): vlxb, vlxbu, vlxh, vlxhu, vlxw, vlxwu, vlxd, vflxh, vflxw, vflxd
-- vector store: vsb, vs, vsw, vsd
-- vector store strided: vssb, vssh, vssw, vssd
-- vector store indexed (scatter): vsxb, vsxh, vsxw, vsxd
-- vector store, indexed, unordered: vsxub, vsxuh, vsxuw, vsxud
+- a `vm` argument represents an optional mask. It can be `v0.t`, or not present for unmasked
 
-Vector Integer Instructions
-===========================
+Vector Load/Store
+=================
 
-- add: vadd,    vaddi, vaddw, vaddiw
-- subtract:     vsub, vsubw
-- multiply:     vmul, vmulh, vmulhsu, vmulhu
-- widening mul: vmulwdn
-- divide:       vdiv, vdivu, vrem, vremu
-- shift:        vsll, vslli, vsra, vsrai, vsrl, vsrli
-- logical:      vand, vandi, vor, vori, vxor, vxori
-- compare:      vseq, vslt, vsltu
-- fixed point:  vclipb, vclipbu, vcliph, vcliphu, vclipw, vclipwu
+- `vlm.v vd, (rs1)`: Load mask: loads byte vector of length ceil(vl/8) 
+- `vsm.v vs3, (rs1)`: Store mask
 
-Vector Data Movement
-====================
+## Unit Strided
 
-- insert gpr or fp into vector: `vins vd, src, index` (index : gpr, src : gpr or fp)
-- extract: `vext rd, vs, index`
-- vector-{vector,gpr,fp} merge: `vmerge vd, dst, vs2, vm` (mask picks src)
-- vector register gather: `vrgather vd, vs1, vs2, vm`
-- gpr splat/bcast: `vsplatx vd, rs1`
+- `vle64.v vd, (rs1), vm`: 64-bit unit-strided load
+- `vse32.v vs3, (rs1), vm`: 32-bit unit-strided store
+
+- `vle64ff.v vd, (rs1), vm`: fault-only-first variant
+
+## Strided
+
+- `vlse16.v vd, (rs1), rs2, vm`: 16-bit strided load, rs2=byte stride
+- `vsse64.v vs3, (rs1), rs2, vm `: 64-bit strided store
+
+## Indexed
+
+> Note: the bitlen suffix here is for the indexes, not the elements (those obey SEW)
+
+- `vluxei64.v vd, (rs1), vs2, vm`: Index unordered load of SEW data, vs2=byte offsets
+- `vloxei32.v vd, (rs1), vs2, vm`: Index ordered load
+- `vsuxei16.v vs3, (rs1), vs2, vm`:  Index unordered store
+- `vsoxei8.v vs3, (rs1), vs2, vm`:  Index ordered store
+
