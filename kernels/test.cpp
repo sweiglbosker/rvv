@@ -76,7 +76,7 @@ bool test_saxpyf32(size_t vlen) {
   }
 
   saxpyf32_ref(ref_res.get(), x.get(), y.get(), s, vlen);
-  saxpyf32(ref_res.get(), x.get(), y.get(), s, vlen);
+  saxpyf32(res.get(), x.get(), y.get(), s, vlen);
 
   if (checkbuf(res.get(), ref_res.get(), vlen)) {
     std::println("\033[32mSUCCESS\033[0m: {} with vlen={}", __FUNCTION__, vlen);
